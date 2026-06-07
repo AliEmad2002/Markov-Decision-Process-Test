@@ -2,6 +2,7 @@
  * main.cpp
  * Author: Ali Emad
  * Date: 7 Jun 2026
+ * This program simulates an MDP evaluation using the Monte-Carlo method
  * Reference: https://www.youtube.com/watch?v=VnpRp7ZglfA
  */
 
