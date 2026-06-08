@@ -2,7 +2,8 @@
  * main.cpp
  * Author: Ali Emad
  * Date: 7 Jun 2026
- * This program simulates an MDP evaluation using the Monte-Carlo method
+ * This program simulates an MDP evaluation using the Monte-Carlo method and
+ * the Q-learning method and puts them into a comparison
  * Reference: https://www.youtube.com/watch?v=VnpRp7ZglfA
  */
 
@@ -27,9 +28,21 @@
  #define N_EPISODES      200000
 
 /*  Maximum number of samples (i.e.: movements) in a single episode */
-#define MAX_SAMPLES_PER_EPISODE     200
+#define MAX_SAMPLES_PER_EPISODE     40
 
+/*  TODO: explain terminology of gamma  */
 #define GAMMA       0.8f
+
+/*  TODO: explain terminology of alpha  */
+#define ALPHA       0.1f
+
+/*  Epsilon decaying speed  */
+#define EPSILON_DECAY_SPEED         10
+
+/*  Method used */
+#define MONTE_CARLO         0
+#define Q_LEARNING          1
+#define LEARNING_METHOD     Q_LEARNING
 
 
 /******************************************************************************
@@ -182,6 +195,26 @@ public:
         m_dotPosition = m_InitialDotPosition;
     }
 
+    /*  Resets the agent (i.e.: dot) to a random position    */
+    void resetRand()
+    {
+        while(1)
+        {
+            int x = abs(rand()) % (m_border.getX()+1);
+            int y = abs(rand()) % (m_border.getY()+1);
+            CPosition newPos(x, y);
+            if (isPositionOutOfBorder(newPos) || isPositionRestricted(newPos) || newPos == m_targetDotPosition)
+            {
+                continue;
+            }
+            else
+            {
+                m_dotPosition = newPos;
+                break;
+            }
+        }
+    }
+
     /*  Moves the agent (i.e.: dot) based on a certain action. Movement is ignored if it is out of border   */
     void move(const EAction a)
     {
@@ -317,6 +350,22 @@ public:
         return best;
     }
 
+    /*  Returns the maximum of certain state's Action-value */
+    float maxAt(const CPosition& dotPosition)
+    {
+        float bestVal = this->at(dotPosition, UP);
+
+        for (int a = 1; a < EAction_MAX; a++)
+        {
+            if (this->at(dotPosition, (EAction)a) > bestVal)
+            {
+                bestVal = this->at(dotPosition, (EAction)a);
+            }
+        }
+
+        return bestVal;
+    }
+
     /*  Prints all values of the action value function in a table format */
     void print(const CPosition& border) // todo: make this function const on "this"
     {
@@ -402,14 +451,15 @@ int main (int argc, char* argv[])
         Episode episode;
 
         /*  Reset the environment (todo: instead of resetting, let's put the agent at a random start position, which is better for RL BTW?)  */
-        env.reset();
+        env.resetRand();
+        // env.reset();
         
         /*  
          * Exploration Vs Eploitation tradeoff: epsilon starts large
          * (High exploration - Low exploitation) and trends downwards
          * (Low exploration - High exploitation) as the model learns
          */
-        float epsilon = std::max(0.05f, 0.8f - (static_cast<float>(i) / static_cast<float>(N_EPISODES/2)) * 0.75f);
+        float epsilon = std::max(0.05f, 0.8f - (static_cast<float>(i) / static_cast<float>(N_EPISODES/EPSILON_DECAY_SPEED)) * 0.75f);
 
         /*  For every sample in the episode */
         for (int j = 0; j < MAX_SAMPLES_PER_EPISODE; j++)
@@ -433,6 +483,17 @@ int main (int argc, char* argv[])
 
             episode.push_back(sample);
 
+            #if LEARNING_METHOD == Q_LEARNING
+            /*  if this is not the first sample in the episode    */
+            if (j > 0)
+            {
+                /*  Update the Q-table using the previous sample's data   */
+                float& qPrev = q.at(episode[j-1].m_s, episode[j-1].m_a);
+                float qCurrentBest = q.maxAt(episode[j].m_s);
+                qPrev = qPrev + ALPHA * (episode[j-1].m_r + GAMMA * qCurrentBest - qPrev);
+            }
+            #endif
+
             /*  Give user chance to stop the simulation */
             if (_kbhit())
             {
@@ -443,10 +504,19 @@ int main (int argc, char* argv[])
             if (env.isTargetReached())
             {
                 nSuccess++;
+
+                #if LEARNING_METHOD == Q_LEARNING
+                /*  Update the Q-table using the last sample's data   */
+                float& qLast = q.at(episode[j].m_s, episode[j].m_a);
+                float qCurrentBest = 0.0f;
+                qLast = qLast + ALPHA * (episode[j].m_r + GAMMA * qCurrentBest - qLast);
+                #endif
+
                 break; // end episode
             }
         }
 
+        #if LEARNING_METHOD == MONTE_CARLO
         /*  Evaluate returns (i.e.: G's) of this episode */
         float gPrev = 0.0f;
         for (auto& sample : std::ranges::reverse_view(episode))
@@ -454,8 +524,9 @@ int main (int argc, char* argv[])
             sample.m_g = gPrev * GAMMA + sample.m_r;
             gPrev = sample.m_g;
 
-            q.at(sample.m_s, sample.m_a) = q.at(sample.m_s, sample.m_a) + (sample.m_g - q.at(sample.m_s, sample.m_a)) * 0.1f;
+            q.at(sample.m_s, sample.m_a) = q.at(sample.m_s, sample.m_a) + (sample.m_g - q.at(sample.m_s, sample.m_a)) * ALPHA;
         }
+        #endif
 
         if (i%100 == 0)
             std::cout << "Episode#: " << i << "\tTotal Successes: " << nSuccess << "\tCurrent Episode Length: " << episode.size() << std::endl;
